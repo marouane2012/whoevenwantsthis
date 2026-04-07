@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Finger Warp Lines</title>
+  <style>
+    body { margin: 0; overflow: hidden; background: #000; }
+    canvas { position: fixed; inset: 0; }
+    video { display: none; }
+  </style>
+</head>
+<body>
+  <video id="video" playsinline></video>
+  <canvas id="canvas"></canvas>
+
+  <!-- MediaPipe Hands (example URL, replace with current CDN if needed) -->
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+
+  <script>
+    const video  = document.getElementById('video');
+    const canvas = document.getElementById('canvas');
+    const ctx    = canvas.getContext('2d');
+
+    function resize() {
+      canvas.width  = window.innerWidth;
+      canvas.height = window.innerHeight;
+    }
+    window.addEventListener('resize', resize);
+    resize();
+
+    // --- MediaPipe Hands setup ---
+    const hands = new Hands({
+      locateFile: (file) =>
+        `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
+    });
+    hands.setOptions({
+      maxNumHands: 2,
+      modelComplexity: 1,
+      minDetectionConfidence: 0.6,
+      minTrackingConfidence: 0.6
+    });
+
+    let fingerPoints = []; // [{x,y}, ...]
+
+    hands.onResults((results) => {
+      fingerPoints = [];
+      if (results.multiHandLandmarks) {
+        for (const hand of results.multiHandLandmarks) {
+          // Fingertip indices: 4, 8, 12, 16, 20
+          [4, 8, 12, 16, 20].forEach(i => {
+            const p = hand[i];
+            fingerPoints.push({
+              x: p.x * canvas.width,
+              y: p.y * canvas.height
+            });
+          });
+        }
+      }
+      draw();
+    });
+
+    const camera = new Camera(video, {
+      onFrame: async () => {
+        await hands.send({ image: video });
+      },
+      width: 640,
+      height: 480,
+      facingMode: 'user'
+    });
+    camera.start();
+
+    function draw() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.strokeStyle = '#0f0';
+      ctx.lineWidth = 1;
+
+      const lines = 200;
+      for (let i = 0; i < lines; i++) {
+        const y = (canvas.height * i) / (lines - 1);
+        ctx.beginPath();
+        const segments = 200;
+        for (let j = 0; j < segments; j++) {
+          const t = j / (segments - 1);
+          let x = t * canvas.width;
+
+          // Warp towards each finger: simple radial pull
+          let offset = 0;
+          for (const f of fingerPoints) {
+            const dx = x - f.x;
+            const dy = y - f.y;
+            const dist = Math.sqrt(dx*dx + dy*dy) + 1;
+            const strength = 8000 / (dist * dist); // tweak
+            offset += strength * Math.sign(f.y - y); // bend toward finger
+          }
+          const warpedY = y + offset;
+
+          if (j === 0) ctx.moveTo(x, warpedY);
+          else ctx.lineTo(x, warpedY);
+        }
+        ctx.stroke();
+      }
+    }
+  </script>
+</body>
+</html>
